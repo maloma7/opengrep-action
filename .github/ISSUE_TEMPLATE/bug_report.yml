@@ -1,0 +1,127 @@
+name: Bug Report
+description: Report a bug or issue with the OpenGrep GitHub Action
+title: "[Bug]: "
+labels: ["bug"]
+assignees:
+  - maloma7
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us reproduce and fix the issue.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checks
+      description: Please verify these items before submitting
+      options:
+        - label: I have searched existing issues to ensure this bug hasn't been reported
+          required: true
+        - label: I have read the troubleshooting section in the README
+          required: true
+        - label: This issue is specifically related to the OpenGrep GitHub Action (not OpenGrep CLI itself)
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is
+      placeholder: Describe what happened and what you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the issue
+      placeholder: |
+        1. Configure GitHub Action with...
+        2. Run workflow with inputs...
+        3. Observe error in action logs...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include error messages if any.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Information
+      description: Please provide your environment details
+      placeholder: |
+        - Runner: [e.g., ubuntu-latest, ubuntu-22.04]
+        - OpenGrep Action version: [e.g., v1.0.0 or commit hash]
+        - OpenGrep version: [from action logs, e.g., 1.10.0]
+        - Repository type: [public/private]
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Action Configuration
+      description: Share your GitHub workflow configuration
+      placeholder: |
+        ```yaml
+        - name: OpenGrep Scan
+          uses: maloma7/opengrep-action@v1
+          with:
+            paths: 'src app'
+            output-format: 'sarif'
+            severity: 'ERROR'
+            verify-signature: 'true'
+        ```
+      render: markdown
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Action Logs
+      description: |
+        Include relevant GitHub Actions logs from the failed run.
+        Please redact any sensitive information.
+      placeholder: |
+        ```
+        Run maloma7/opengrep-action@v1
+        ##[group]Downloading OpenGrep v1.10.0
+        Downloading from: https://github.com/opengrep/opengrep/releases/download/v1.10.0/opengrep-core_linux_x86.tar.gz
+        ##[error]OpenGrep scan failed with exit code 2
+        ```
+      render: markdown
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severe is this bug?
+      options:
+        - Low (Minor inconvenience)
+        - Medium (Affects functionality)
+        - High (Blocks normal usage)
+        - Critical (Security issue or data loss)
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or information that might help
