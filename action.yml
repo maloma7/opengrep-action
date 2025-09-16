@@ -99,12 +99,10 @@ runs:
       run: |
         case "${{ runner.arch }}" in
           X64)
-            echo "binary-name=opengrep-core_linux_x86.tar.gz" >> $GITHUB_OUTPUT
-            echo "signature-binary-name=opengrep_manylinux_x86" >> $GITHUB_OUTPUT
+            echo "binary-name=opengrep_manylinux_x86" >> $GITHUB_OUTPUT
             ;;
           ARM64)
-            echo "binary-name=opengrep-core_linux_aarch64.tar.gz" >> $GITHUB_OUTPUT
-            echo "signature-binary-name=opengrep_manylinux_aarch64" >> $GITHUB_OUTPUT
+            echo "binary-name=opengrep_manylinux_aarch64" >> $GITHUB_OUTPUT
             ;;
           *)
             echo "::error::Unsupported architecture: ${{ runner.arch }}"
@@ -128,17 +126,13 @@ runs:
         mkdir -p "${{ github.action_path }}/bin"
         cd "${{ github.action_path }}/bin"
 
-        # Download the binary
-        download_url="https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${{ steps.platform.outputs.binary-name }}"
+        # Download the standalone binary (already signed)
+        binary_name="${{ steps.platform.outputs.binary-name }}"
+        download_url="https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}"
         echo "Downloading from: $download_url"
 
-        curl -fsSL "$download_url" -o opengrep-archive.tar.gz
-
-        # Extract and setup binary
-        tar -xzf opengrep-archive.tar.gz
-        mv opengrep-core opengrep
+        curl -fsSL "$download_url" -o opengrep
         chmod +x opengrep
-        rm -f opengrep-archive.tar.gz
 
         # Download and verify signature if enabled
         if [ "${{ inputs.verify-signature }}" = "true" ]; then
@@ -164,27 +158,26 @@ runs:
             sudo mv "${cosign_binary}" /usr/local/bin/cosign
           fi
 
-          # Use the correct signature binary name for OpenGrep releases
-          signature_binary_name="${{ steps.platform.outputs.signature-binary-name }}"
-          extracted_binary="opengrep"
+          # Use the same binary name for signatures (standalone binaries have matching signatures)
+          binary_name="${{ steps.platform.outputs.binary-name }}"
 
-          echo "Downloading signature files for ${signature_binary_name}..."
+          echo "Downloading signature files for ${binary_name}..."
 
           # Download signature and certificate files
-          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${signature_binary_name}.sig" -o "${signature_binary_name}.sig"
-          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${signature_binary_name}.cert" -o "${signature_binary_name}.cert"
+          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}.sig" -o "opengrep.sig"
+          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}.cert" -o "opengrep.cert"
 
           # Verify signature using OpenGrep's keyless signing approach
-          echo "Verifying signature for ${extracted_binary} using ${signature_binary_name} signatures..."
+          echo "Verifying signature for opengrep binary..."
           cosign verify-blob \
-            --certificate "${signature_binary_name}.cert" \
-            --signature "${signature_binary_name}.sig" \
+            --certificate "opengrep.cert" \
+            --signature "opengrep.sig" \
             --certificate-identity-regexp "https://github.com/opengrep/opengrep.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            "${extracted_binary}"
+            "opengrep"
 
           # Cleanup signature files
-          rm -f "${signature_binary_name}.sig" "${signature_binary_name}.cert"
+          rm -f "opengrep.sig" "opengrep.cert"
 
           echo "Binary signature verification successful!"
 
