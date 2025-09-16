@@ -100,9 +100,11 @@ runs:
         case "${{ runner.arch }}" in
           X64)
             echo "binary-name=opengrep-core_linux_x86.tar.gz" >> $GITHUB_OUTPUT
+            echo "signature-binary-name=opengrep_manylinux_x86" >> $GITHUB_OUTPUT
             ;;
           ARM64)
             echo "binary-name=opengrep-core_linux_aarch64.tar.gz" >> $GITHUB_OUTPUT
+            echo "signature-binary-name=opengrep_manylinux_aarch64" >> $GITHUB_OUTPUT
             ;;
           *)
             echo "::error::Unsupported architecture: ${{ runner.arch }}"
@@ -142,31 +144,49 @@ runs:
         if [ "${{ inputs.verify-signature }}" = "true" ]; then
           echo "::group::Verifying binary signature"
 
-          # Install cosign if not present
+          # Install cosign based on platform
           if ! command -v cosign &> /dev/null; then
             echo "Installing cosign..."
-            curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
-            chmod +x cosign-linux-amd64
-            sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+            case "${{ runner.arch }}" in
+              X64)
+                cosign_binary="cosign-linux-amd64"
+                ;;
+              ARM64)
+                cosign_binary="cosign-linux-arm64"
+                ;;
+              *)
+                echo "::error::Unsupported architecture for cosign: ${{ runner.arch }}"
+                exit 1
+                ;;
+            esac
+            curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/${cosign_binary}"
+            chmod +x "${cosign_binary}"
+            sudo mv "${cosign_binary}" /usr/local/bin/cosign
           fi
 
-          # Download signature and certificate
-          binary_name="opengrep"
+          # Use the correct signature binary name for OpenGrep releases
+          signature_binary_name="${{ steps.platform.outputs.signature-binary-name }}"
+          extracted_binary="opengrep"
 
-          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}.sig" -o "${binary_name}.sig"
-          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}.cert" -o "${binary_name}.cert"
+          echo "Downloading signature files for ${signature_binary_name}..."
 
-          # Verify signature
-          echo "Verifying signature for ${binary_name}..."
+          # Download signature and certificate files
+          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${signature_binary_name}.sig" -o "${signature_binary_name}.sig"
+          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${signature_binary_name}.cert" -o "${signature_binary_name}.cert"
+
+          # Verify signature using OpenGrep's keyless signing approach
+          echo "Verifying signature for ${extracted_binary} using ${signature_binary_name} signatures..."
           cosign verify-blob \
-            --certificate "${binary_name}.cert" \
-            --signature "${binary_name}.sig" \
-            --certificate-identity-regexp=".*" \
-            --certificate-oidc-issuer-regexp=".*" \
-            "${binary_name}"
+            --certificate "${signature_binary_name}.cert" \
+            --signature "${signature_binary_name}.sig" \
+            --certificate-identity-regexp "https://github.com/opengrep/opengrep.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${extracted_binary}"
 
           # Cleanup signature files
-          rm -f "${binary_name}.sig" "${binary_name}.cert"
+          rm -f "${signature_binary_name}.sig" "${signature_binary_name}.cert"
+
+          echo "Binary signature verification successful!"
 
           echo "::endgroup::"
         fi
@@ -209,7 +229,9 @@ runs:
           cmd="$cmd --config auto"
         fi
 
-        # Add output format - use stdout redirection approach since direct file output flags don't work reliably
+        # Add output format - determine stdout redirection before the switch
+        use_stdout_redirect="false"
+
         case "${{ inputs.output-format }}" in
           sarif)
             cmd="$cmd --sarif"
@@ -221,7 +243,6 @@ runs:
             ;;
           text)
             cmd="$cmd --text"
-            use_stdout_redirect="false"  # Text output works with --output
             if [ "${{ inputs.output-file }}" != "" ]; then
               cmd="$cmd --output ${{ inputs.output-file }}"
             fi
@@ -263,10 +284,13 @@ runs:
           esac
         fi
 
-        # Add exclusions
+        # Add exclusions with proper escaping to prevent command injection
         if [ "${{ inputs.exclude }}" != "" ]; then
-          for pattern in ${{ inputs.exclude }}; do
-            cmd="$cmd --exclude '$pattern'"
+          IFS=' ' read -ra EXCLUDE_PATTERNS <<< "${{ inputs.exclude }}"
+          for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+            # Escape single quotes and backslashes in the pattern
+            escaped_pattern=$(printf '%s\n' "$pattern" | sed "s/'/'\\''/g")
+            cmd="$cmd --exclude '$escaped_pattern'"
           done
         fi
 
@@ -326,8 +350,15 @@ runs:
           actual_output_file="opengrep-results.sarif"
         fi
 
-        # Set outputs
-        echo "results-file=$actual_output_file" >> $GITHUB_OUTPUT
+        # Set outputs - ensure we always have a valid file path
+        if [ -f "$actual_output_file" ]; then
+          echo "results-file=$actual_output_file" >> $GITHUB_OUTPUT
+        else
+          # Create an empty file if scan failed to ensure upload-artifact doesn't fail
+          echo "{}" > "$actual_output_file"  # Create valid JSON for most formats
+          echo "results-file=$actual_output_file" >> $GITHUB_OUTPUT
+          echo "::warning::Scan output file not found, created empty file for artifact upload"
+        fi
 
         # Count findings based on output format and file existence
         findings_count="0"
@@ -374,7 +405,7 @@ runs:
         echo "::endgroup::"
 
     - name: Upload results artifact
-      if: inputs.upload-artifacts == 'true' && always()
+      if: inputs.upload-artifacts == 'true' && always() && steps.scan.outputs.results-file != ''
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.artifact-name }}

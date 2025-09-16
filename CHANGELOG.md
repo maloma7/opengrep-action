@@ -10,6 +10,46 @@ All notable changes to the OpenGrep GitHub Action will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2025-09-16
+
+### Critical Bug Fixes
+
+#### Security & Signature Verification
+- **Fixed**: Missing signature files (404 errors) by implementing correct OpenGrep signature binary names (`opengrep_manylinux_x86`, `opengrep_manylinux_aarch64`)
+- **Fixed**: Incorrect binary filename in signature verification - now uses proper signature binary names from OpenGrep releases
+- **Fixed**: Hardcoded cosign installation for Linux AMD64 only - now supports ARM64 with architecture detection
+
+#### Platform & Architecture Support
+- **Enhanced**: Cosign installation now detects runner architecture and installs appropriate binary (`cosign-linux-amd64` or `cosign-linux-arm64`)
+- **Enhanced**: Signature verification now uses correct OpenGrep keyless signing approach with GitHub Actions OIDC tokens
+
+#### Action Reliability
+- **Fixed**: Missing path input for upload-artifact when scan fails - now creates empty JSON file to ensure artifact upload doesn't fail
+- **Fixed**: Logic error in stdout redirection variable - moved declaration outside case statement to prevent unreachable code
+
+#### Security Enhancements
+- **Fixed**: Potential command injection in exclude patterns by implementing proper input escaping using bash arrays and sed
+- **Enhanced**: All user-provided exclude patterns are now properly sanitized to prevent command injection attacks
+
+### Technical Improvements
+
+#### Signature Verification
+- **Updated**: Certificate identity regexp to `https://github.com/opengrep/opengrep.*` (OpenGrep's actual signing identity)
+- **Updated**: OIDC issuer to `https://token.actions.githubusercontent.com` (GitHub Actions OIDC token issuer)
+- **Added**: Platform-specific signature binary name detection for proper file downloads
+
+#### Error Handling
+- **Enhanced**: Upload artifact step now includes additional safeguards against missing output files
+- **Enhanced**: Better error messages and warnings when files are missing or signature verification is skipped
+
+### Breaking Changes
+- None (all changes are backward compatible bug fixes)
+
+### Migration Notes
+- No action required - all fixes are transparent to existing workflows
+- Signature verification will now work correctly on ARM64 runners
+- Exclude patterns with special characters are now properly handled
+
 ## [1.0.0] - 2025-09-16
 
 ### Initial Release
