@@ -68,7 +68,7 @@ body:
       placeholder: |
         - Runner: [e.g., ubuntu-latest, ubuntu-22.04]
         - OpenGrep Action version: [e.g., v1.0.0 or commit hash]
-        - OpenGrep version: [from action logs, e.g., 1.10.0]
+        - OpenGrep version: [from action logs, e.g., 1.10.2]
         - Repository type: [public/private]
       render: markdown
     validations:
@@ -101,8 +101,8 @@ body:
       placeholder: |
         ```
         Run maloma7/opengrep-action@v1
-        ##[group]Downloading OpenGrep v1.10.0
-        Downloading from: https://github.com/opengrep/opengrep/releases/download/v1.10.0/opengrep-core_linux_x86.tar.gz
+        ##[group]Downloading OpenGrep v1.10.2
+        Downloading from: https://github.com/opengrep/opengrep/releases/download/v1.10.2/opengrep-core_linux_x86.tar.gz
         ##[error]OpenGrep scan failed with exit code 2
         ```
       render: markdown

@@ -28,10 +28,13 @@ A production-grade GitHub Action for running [OpenGrep](https://github.com/openg
 - **Security-First**: Cosign signature verification for binary integrity
 - **Multiple Outputs**: JSON, SARIF, text, GitLab SAST/Secrets, JUnit XML formats
 - **Linux Optimized**: Native support for GitHub Actions runners (x86_64, ARM64)
-- **High Performance**: Binary caching and efficient scanning algorithms
-- **Enterprise Ready**: Robust error handling, timeout control, and comprehensive logging
-- **Highly Configurable**: Custom rules, severity filtering, and flexible output options
+- **High Performance**: Binary caching, parallel scanning, and efficient algorithms
+- **Git-Aware Scanning**: Differential scanning with automatic PR baseline detection
+- **Modular Architecture**: 7 independent scripts for maintainability and testing
+- **Enterprise Ready**: Robust error handling, retry logic, and comprehensive logging
+- **Highly Configurable**: 21 input parameters for complete control
 - **Artifact Integration**: Seamless integration with GitHub Actions artifacts
+- **Production-Grade**: Comprehensive test suite with 8 test jobs validating all features
 
 ## Installation
 
@@ -86,7 +89,7 @@ Full configuration with all available options:
   uses: maloma7/opengrep-action@v1
   with:
     # OpenGrep Configuration
-    version: 'v1.10.0'                    # OpenGrep version to use
+    version: 'v1.10.2'                    # OpenGrep version to use
     config: 'security/custom-rules.yml'    # Custom rules file or 'auto'
     paths: 'src app components'             # Paths to scan (space-separated)
 
@@ -169,16 +172,19 @@ For repositories with GitHub Advanced Security:
 ### Multi-Environment Strategy
 
 ```yaml
-# Quick scan for pull requests
+# Quick scan for pull requests with differential scanning
 - name: PR Security Check
   if: github.event_name == 'pull_request'
   uses: maloma7/opengrep-action@v1
   with:
     severity: 'ERROR'
     timeout: '300'
-    paths: ${{ steps.changed-files.outputs.files }}
+    paths: 'src app'
+    # Baseline commit is auto-detected from PR base
+    # Or specify manually:
+    # baseline-commit: ${{ github.event.pull_request.base.sha }}
 
-# Comprehensive scan for main branch
+# Comprehensive scan for main branch with parallelization
 - name: Full Security Audit
   if: github.ref == 'refs/heads/main'
   uses: maloma7/opengrep-action@v1
@@ -186,6 +192,8 @@ For repositories with GitHub Advanced Security:
     config: '.github/security/comprehensive-rules.yml'
     severity: 'INFO'
     timeout: '1800'
+    jobs: '4'                               # Parallel scanning
+    max-memory: '4096'                      # 4GB memory limit
     fail-on-findings: 'true'
 ```
 
@@ -351,15 +359,23 @@ For complete OpenGrep CLI documentation, visit: https://github.com/opengrep/open
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `version` | string | `v1.10.0` | OpenGrep version to download and use |
+| `version` | string | `v1.10.2` | OpenGrep version to download and use |
 | `config` | string | `auto` | Rule configuration: 'auto', file path, or rule content |
 | `paths` | string | `.` | Space-separated paths to scan |
 | `output-format` | string | `json` | Output format: json, sarif, text, gitlab-sast, etc. |
 | `output-file` | string | `opengrep-results.json` | Output file path |
 | `severity` | string | `INFO` | Minimum severity: INFO, WARNING, ERROR |
 | `exclude` | string | `` | Space-separated exclusion patterns |
+| `include` | string | `` | Space-separated inclusion patterns |
 | `max-target-bytes` | string | `1000000` | Maximum file size to scan (bytes) |
 | `timeout` | string | `1800` | Scan timeout in seconds |
+| `jobs` | string | `0` | Number of parallel jobs (0 = auto-detect) |
+| `max-memory` | string | `0` | Maximum memory in MB (0 = unlimited) |
+| `baseline-commit` | string | `` | Git commit for differential scanning (auto-detected in PRs) |
+| `diff-depth` | string | `2` | Git diff depth for changed files scanning |
+| `enable-metrics` | boolean | `false` | Enable OpenGrep anonymous metrics |
+| `verbose` | boolean | `false` | Enable verbose output mode |
+| `no-git-ignore` | boolean | `false` | Ignore .gitignore files during scanning |
 | `verify-signature` | boolean | `true` | Verify binary signature with Cosign |
 | `fail-on-findings` | boolean | `false` | Fail workflow when findings detected |
 | `upload-artifacts` | boolean | `true` | Upload results to GitHub artifacts |
@@ -372,6 +388,7 @@ For complete OpenGrep CLI documentation, visit: https://github.com/opengrep/open
 | `results-file` | string | Path to the generated results file |
 | `findings-count` | number | Total number of security findings detected |
 | `critical-count` | number | Number of high/critical severity findings |
+| `scan-exit-code` | number | OpenGrep scan exit code (0=success, 1=findings, 2=error, 3=timeout) |
 
 ## Troubleshooting
 
@@ -454,11 +471,10 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 
 - [OpenGrep](https://github.com/opengrep/opengrep) - The core static analysis engine
 - [Semgrep](https://semgrep.dev/) - The original Semgrep project
-- [GitHub Advanced Security](https://github.com/features/security) - Native GitHub security scanning
 
 ---
 
-**Last Updated**: September 16, 2025
-**Version**: 1.0.0
+**Last Updated**: October 16, 2025
+**Version**: 2.0.0
 
 *This documentation is actively maintained and updated with each release. For the latest information, please check the [releases page](https://github.com/maloma7/opengrep-action/releases).*

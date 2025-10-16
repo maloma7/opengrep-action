@@ -11,7 +11,7 @@ inputs:
   version:
     description: 'OpenGrep version to use'
     required: false
-    default: 'v1.10.0'
+    default: 'v1.10.2'
 
   config:
     description: 'Rule configuration (auto, path to config file, or inline rules)'
@@ -45,6 +45,11 @@ inputs:
     required: false
     default: ''
 
+  include:
+    description: 'Include patterns (space-separated)'
+    required: false
+    default: ''
+
   max-target-bytes:
     description: 'Maximum bytes to scan per file'
     required: false
@@ -54,6 +59,44 @@ inputs:
     description: 'Timeout in seconds'
     required: false
     default: '1800'
+
+  # Performance Options
+  jobs:
+    description: 'Number of parallel jobs (0 = auto-detect)'
+    required: false
+    default: '0'
+
+  max-memory:
+    description: 'Maximum memory in MB (0 = unlimited)'
+    required: false
+    default: '0'
+
+  # Git-Aware Scanning
+  baseline-commit:
+    description: 'Git commit to use as baseline for differential scanning'
+    required: false
+    default: ''
+
+  diff-depth:
+    description: 'Git diff depth for changed files scanning'
+    required: false
+    default: '2'
+
+  # Advanced Options
+  enable-metrics:
+    description: 'Enable OpenGrep anonymous metrics'
+    required: false
+    default: 'false'
+
+  verbose:
+    description: 'Enable verbose output'
+    required: false
+    default: 'false'
+
+  no-git-ignore:
+    description: 'Ignore .gitignore files'
+    required: false
+    default: 'false'
 
   # Security Options
   verify-signature:
@@ -80,328 +123,162 @@ inputs:
 outputs:
   results-file:
     description: 'Path to the results file'
-    value: ${{ steps.scan.outputs.results-file }}
+    value: ${{ steps.process.outputs.results-file }}
 
   findings-count:
     description: 'Number of findings detected'
-    value: ${{ steps.scan.outputs.findings-count }}
+    value: ${{ steps.process.outputs.findings-count }}
 
   critical-count:
     description: 'Number of critical/high severity findings'
-    value: ${{ steps.scan.outputs.critical-count }}
+    value: ${{ steps.process.outputs.critical-count }}
+
+  scan-exit-code:
+    description: 'OpenGrep scan exit code'
+    value: ${{ steps.scan.outputs.scan-exit-code }}
 
 runs:
   using: 'composite'
   steps:
+    # Step 1: Validate all inputs
+    - name: Validate inputs
+      shell: bash
+      run: |
+        export INPUT_VERSION="${{ inputs.version }}"
+        export INPUT_OUTPUT_FORMAT="${{ inputs.output-format }}"
+        export INPUT_SEVERITY="${{ inputs.severity }}"
+        export INPUT_MAX_TARGET_BYTES="${{ inputs.max-target-bytes }}"
+        export INPUT_TIMEOUT="${{ inputs.timeout }}"
+        export INPUT_VERIFY_SIGNATURE="${{ inputs.verify-signature }}"
+        export INPUT_FAIL_ON_FINDINGS="${{ inputs.fail-on-findings }}"
+        export INPUT_UPLOAD_ARTIFACTS="${{ inputs.upload-artifacts }}"
+        export INPUT_PATHS="${{ inputs.paths }}"
+        export INPUT_OUTPUT_FILE="${{ inputs.output-file }}"
+
+        "${{ github.action_path }}/scripts/validate-inputs.sh"
+
+    # Step 2: Detect platform and architecture
     - name: Detect platform and architecture
       id: platform
       shell: bash
       run: |
-        case "${{ runner.arch }}" in
-          X64)
-            echo "binary-name=opengrep_manylinux_x86" >> $GITHUB_OUTPUT
-            ;;
-          ARM64)
-            echo "binary-name=opengrep_manylinux_aarch64" >> $GITHUB_OUTPUT
-            ;;
-          *)
-            echo "::error::Unsupported architecture: ${{ runner.arch }}"
-            exit 1
-            ;;
-        esac
+        "${{ github.action_path }}/scripts/detect-platform.sh" "${{ runner.arch }}"
 
+    # Step 3: Cache cosign binary (performance optimization)
+    - name: Cache cosign binary
+      id: cache-cosign
+      uses: actions/cache@v4
+      if: inputs.verify-signature == 'true'
+      with:
+        path: /usr/local/bin/cosign
+        key: cosign-${{ runner.os }}-${{ steps.platform.outputs.arch }}-v2
+
+    # Step 4: Cache OpenGrep binary
     - name: Cache OpenGrep binary
       id: cache
       uses: actions/cache@v4
       with:
-        path: ${{ github.action_path }}/bin/opengrep
-        key: opengrep-${{ inputs.version }}-${{ runner.arch }}
+        path: |
+          ${{ github.action_path }}/bin/opengrep
+          ${{ github.action_path }}/bin/.verified
+        key: opengrep-${{ inputs.version }}-${{ runner.arch }}-v2
 
+    # Step 5: Download and verify OpenGrep binary
     - name: Download OpenGrep binary
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        echo "::group::Downloading OpenGrep ${{ inputs.version }}"
+        export BINARY_NAME="${{ steps.platform.outputs.binary-name }}"
+        export VERSION="${{ inputs.version }}"
+        export ACTION_PATH="${{ github.action_path }}"
 
-        mkdir -p "${{ github.action_path }}/bin"
-        cd "${{ github.action_path }}/bin"
+        "${{ github.action_path }}/scripts/download-binary.sh"
 
-        # Download the standalone binary (already signed)
-        binary_name="${{ steps.platform.outputs.binary-name }}"
-        download_url="https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}"
-        echo "Downloading from: $download_url"
+    # Step 6: Signature verification
+    - name: Verify binary signature
+      if: inputs.verify-signature == 'true' && (steps.cache.outputs.cache-hit != 'true' || !hashFiles(format('{0}/bin/.verified', github.action_path)))
+      shell: bash
+      run: |
+        export BINARY_NAME="${{ steps.platform.outputs.binary-name }}"
+        export VERSION="${{ inputs.version }}"
+        export ACTION_PATH="${{ github.action_path }}"
+        export ARCH="${{ steps.platform.outputs.arch }}"
+        export COSIGN_CACHED="${{ steps.cache-cosign.outputs.cache-hit }}"
 
-        curl -fsSL "$download_url" -o opengrep
-        chmod +x opengrep
+        "${{ github.action_path }}/scripts/verify-signature.sh"
 
-        # Download and verify signature if enabled
-        if [ "${{ inputs.verify-signature }}" = "true" ]; then
-          echo "::group::Verifying binary signature"
-
-          # Install cosign based on platform
-          if ! command -v cosign &> /dev/null; then
-            echo "Installing cosign..."
-            case "${{ runner.arch }}" in
-              X64)
-                cosign_binary="cosign-linux-amd64"
-                ;;
-              ARM64)
-                cosign_binary="cosign-linux-arm64"
-                ;;
-              *)
-                echo "::error::Unsupported architecture for cosign: ${{ runner.arch }}"
-                exit 1
-                ;;
-            esac
-            curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/${cosign_binary}"
-            chmod +x "${cosign_binary}"
-            sudo mv "${cosign_binary}" /usr/local/bin/cosign
-          fi
-
-          # Use the same binary name for signatures (standalone binaries have matching signatures)
-          binary_name="${{ steps.platform.outputs.binary-name }}"
-
-          echo "Downloading signature files for ${binary_name}..."
-
-          # Download signature and certificate files
-          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}.sig" -o "opengrep.sig"
-          curl -fsSL "https://github.com/opengrep/opengrep/releases/download/${{ inputs.version }}/${binary_name}.cert" -o "opengrep.cert"
-
-          # Verify signature using OpenGrep's keyless signing approach
-          echo "Verifying signature for opengrep binary..."
-          cosign verify-blob \
-            --certificate "opengrep.cert" \
-            --signature "opengrep.sig" \
-            --certificate-identity-regexp "https://github.com/opengrep/opengrep.*" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            "opengrep"
-
-          # Cleanup signature files
-          rm -f "opengrep.sig" "opengrep.cert"
-
-          echo "Binary signature verification successful!"
-
-          echo "::endgroup::"
-        fi
-
-        # Verify installation
-        ./opengrep --version
-
-        echo "::endgroup::"
-
+    # Step 7: Validate installation
     - name: Validate OpenGrep installation
       shell: bash
       run: |
-        binary_path="${{ github.action_path }}/bin/opengrep"
+        export BINARY_PATH="${{ github.action_path }}/bin/opengrep"
 
-        if [ ! -f "$binary_path" ]; then
-          echo "::error::OpenGrep binary not found at $binary_path"
-          exit 1
-        fi
+        "${{ github.action_path }}/scripts/validate-installation.sh"
 
-        if [ ! -x "$binary_path" ]; then
-          echo "::error::OpenGrep binary not executable"
-          exit 1
-        fi
+    # Step 8: Auto-detect baseline for PR workflows
+    - name: Setup baseline for PR
+      id: baseline
+      if: github.event_name == 'pull_request' && inputs.baseline-commit == ''
+      shell: bash
+      run: |
+        base_sha="${{ github.event.pull_request.base.sha }}"
+        echo "baseline-commit=$base_sha" >> $GITHUB_OUTPUT
+        echo "::notice::Auto-detected baseline commit for PR: $base_sha"
 
-        echo "OpenGrep version: $($binary_path --version 2>&1 | head -1)"
-
+    # Step 9: Run OpenGrep scan
     - name: Run OpenGrep scan
       id: scan
       shell: bash
+      continue-on-error: true
       run: |
-        echo "::group::Running OpenGrep scan"
+        export OPENGREP_BINARY="${{ github.action_path }}/bin/opengrep"
+        export INPUT_CONFIG="${{ inputs.config }}"
+        export INPUT_OUTPUT_FORMAT="${{ inputs.output-format }}"
+        export INPUT_OUTPUT_FILE="${{ inputs.output-file }}"
+        export INPUT_SEVERITY="${{ inputs.severity }}"
+        export INPUT_EXCLUDE="${{ inputs.exclude }}"
+        export INPUT_INCLUDE="${{ inputs.include }}"
+        export INPUT_MAX_TARGET_BYTES="${{ inputs.max-target-bytes }}"
+        export INPUT_TIMEOUT="${{ inputs.timeout }}"
+        export INPUT_JOBS="${{ inputs.jobs }}"
+        export INPUT_MAX_MEMORY="${{ inputs.max-memory }}"
+        export INPUT_BASELINE_COMMIT="${{ inputs.baseline-commit || steps.baseline.outputs.baseline-commit }}"
+        export INPUT_DIFF_DEPTH="${{ inputs.diff-depth }}"
+        export INPUT_ENABLE_METRICS="${{ inputs.enable-metrics }}"
+        export INPUT_VERBOSE="${{ inputs.verbose }}"
+        export INPUT_NO_GIT_IGNORE="${{ inputs.no-git-ignore }}"
+        export INPUT_PATHS="${{ inputs.paths }}"
 
-        # Build command with OpenGrep scan subcommand
-        cmd="${{ github.action_path }}/bin/opengrep scan"
+        "${{ github.action_path }}/scripts/run-scan.sh"
 
-        # Add configuration
-        if [ "${{ inputs.config }}" != "auto" ]; then
-          cmd="$cmd -f ${{ inputs.config }}"
-        else
-          cmd="$cmd --config auto"
-        fi
+    # Step 10: Process results
+    - name: Process scan results
+      id: process
+      shell: bash
+      run: |
+        "${{ github.action_path }}/scripts/process-results.sh" \
+          "${{ inputs.output-file }}" \
+          "${{ inputs.output-format }}"
 
-        # Add output format - determine stdout redirection before the switch
-        use_stdout_redirect="false"
+    # Step 11: Handle fail-on-findings
+    - name: Check findings threshold
+      if: inputs.fail-on-findings == 'true'
+      shell: bash
+      run: |
+        findings_count="${{ steps.process.outputs.findings-count }}"
 
-        case "${{ inputs.output-format }}" in
-          sarif)
-            cmd="$cmd --sarif"
-            use_stdout_redirect="true"
-            ;;
-          json)
-            cmd="$cmd --json"
-            use_stdout_redirect="true"
-            ;;
-          text)
-            cmd="$cmd --text"
-            if [ "${{ inputs.output-file }}" != "" ]; then
-              cmd="$cmd --output ${{ inputs.output-file }}"
-            fi
-            ;;
-          gitlab-sast)
-            cmd="$cmd --gitlab-sast"
-            use_stdout_redirect="true"
-            ;;
-          gitlab-secrets)
-            cmd="$cmd --gitlab-secrets"
-            use_stdout_redirect="true"
-            ;;
-          junit-xml)
-            cmd="$cmd --junit-xml"
-            use_stdout_redirect="true"
-            ;;
-          semgrep-json)
-            cmd="$cmd --semgrep-json"
-            use_stdout_redirect="true"
-            ;;
-          *)
-            echo "::error::Unsupported output format: ${{ inputs.output-format }}"
-            exit 1
-            ;;
-        esac
-
-        # Add severity filter
-        if [ "${{ inputs.severity }}" != "INFO" ]; then
-          case "${{ inputs.severity }}" in
-            WARNING)
-              cmd="$cmd --severity=WARNING --severity=ERROR"
-              ;;
-            ERROR)
-              cmd="$cmd --severity=ERROR"
-              ;;
-            *)
-              cmd="$cmd --severity=${{ inputs.severity }}"
-              ;;
-          esac
-        fi
-
-        # Add exclusions with proper escaping to prevent command injection
-        if [ "${{ inputs.exclude }}" != "" ]; then
-          IFS=' ' read -ra EXCLUDE_PATTERNS <<< "${{ inputs.exclude }}"
-          for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-            # Escape single quotes and backslashes in the pattern
-            escaped_pattern=$(printf '%s\n' "$pattern" | sed "s/'/'\\''/g")
-            cmd="$cmd --exclude '$escaped_pattern'"
-          done
-        fi
-
-        # Add limits
-        cmd="$cmd --max-target-bytes ${{ inputs.max-target-bytes }}"
-        cmd="$cmd --timeout ${{ inputs.timeout }}"
-
-        # Add paths
-        cmd="$cmd ${{ inputs.paths }}"
-
-        echo "Running command: $cmd"
-
-        # Validate binary accessibility before running
-        if ! "${{ github.action_path }}/bin/opengrep" --version >/dev/null 2>&1; then
-          echo "::error::OpenGrep binary is not functional"
+        if [ "$findings_count" != "unknown" ] && [ "$findings_count" != "0" ] && [ "$findings_count" -gt 0 ]; then
+          echo "::error::Security findings detected: $findings_count findings"
+          echo "::error::Critical/High severity: ${{ steps.process.outputs.critical-count }}"
           exit 1
         fi
 
-        # Run scan and capture exit code, handling stdout redirection if needed
-        set +e
-        if [ "$use_stdout_redirect" = "true" ]; then
-          # Redirect stdout to file for formats that output to stdout
-          eval "$cmd" > "${{ inputs.output-file }}"
-          scan_exit_code=$?
-        else
-          # Run normally for formats that handle file output properly
-          eval "$cmd"
-          scan_exit_code=$?
-        fi
-        set -e
-
-        # Enhanced error handling based on exit codes
-        case $scan_exit_code in
-          0)
-            echo "::notice::Scan completed successfully with no findings"
-            ;;
-          1)
-            echo "::notice::Scan completed with findings detected"
-            ;;
-          2)
-            echo "::error::OpenGrep scan failed due to invalid command line arguments"
-            exit 2
-            ;;
-          3)
-            echo "::error::OpenGrep scan failed due to timeout"
-            exit 3
-            ;;
-          *)
-            echo "::error::OpenGrep scan failed with unexpected exit code: $scan_exit_code"
-            exit $scan_exit_code
-            ;;
-        esac
-
-        # Determine actual output file based on format
-        actual_output_file="${{ inputs.output-file }}"
-        if [ "${{ inputs.output-format }}" = "sarif" ] && [ "$actual_output_file" = "opengrep-results.json" ]; then
-          actual_output_file="opengrep-results.sarif"
-        fi
-
-        # Set outputs - ensure we always have a valid file path
-        if [ -f "$actual_output_file" ]; then
-          echo "results-file=$actual_output_file" >> $GITHUB_OUTPUT
-        else
-          # Create an empty file if scan failed to ensure upload-artifact doesn't fail
-          echo "{}" > "$actual_output_file"  # Create valid JSON for most formats
-          echo "results-file=$actual_output_file" >> $GITHUB_OUTPUT
-          echo "::warning::Scan output file not found, created empty file for artifact upload"
-        fi
-
-        # Count findings based on output format and file existence
-        findings_count="0"
-        critical_count="0"
-
-        if [ -f "$actual_output_file" ]; then
-          case "${{ inputs.output-format }}" in
-            json|semgrep-json)
-              if command -v jq >/dev/null 2>&1; then
-                findings_count=$(jq '.results | length' "$actual_output_file" 2>/dev/null || echo "0")
-                critical_count=$(jq '[.results[] | select(.severity == "ERROR" or .severity == "CRITICAL" or .severity == "HIGH")] | length' "$actual_output_file" 2>/dev/null || echo "0")
-              else
-                echo "::warning::jq not available, cannot count findings from JSON output"
-              fi
-              ;;
-            sarif)
-              if command -v jq >/dev/null 2>&1; then
-                findings_count=$(jq '[.runs[].results] | add | length' "$actual_output_file" 2>/dev/null || echo "0")
-                critical_count=$(jq '[.runs[].results[] | select(.level == "error" or .level == "warning")] | length' "$actual_output_file" 2>/dev/null || echo "0")
-              else
-                echo "::warning::jq not available, cannot count findings from SARIF output"
-              fi
-              ;;
-            *)
-              # For text/other formats, we can't easily count findings
-              echo "::notice::Finding count not available for ${{ inputs.output-format }} format"
-              ;;
-          esac
-        else
-          echo "::warning::Output file not found: $actual_output_file"
-        fi
-
-        echo "findings-count=$findings_count" >> $GITHUB_OUTPUT
-        echo "critical-count=$critical_count" >> $GITHUB_OUTPUT
-
-        echo "::notice::OpenGrep scan completed: $findings_count findings ($critical_count critical/high)"
-
-        # Handle scan results - only fail if we have findings and fail-on-findings is enabled
-        if [ "${{ inputs.fail-on-findings }}" = "true" ] && [ "$findings_count" -gt 0 ]; then
-          echo "::error::$findings_count security findings detected (fail-on-findings enabled)"
-          exit 1
-        fi
-
-        echo "::endgroup::"
-
+    # Step 12: Upload artifacts
     - name: Upload results artifact
-      if: inputs.upload-artifacts == 'true' && always() && steps.scan.outputs.results-file != ''
+      if: inputs.upload-artifacts == 'true' && always()
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.artifact-name }}
-        path: ${{ steps.scan.outputs.results-file }}
+        path: ${{ inputs.output-file }}
         retention-days: 30
         if-no-files-found: warn
