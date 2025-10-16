@@ -104,7 +104,8 @@ count_text_findings() {
         local line_count
         line_count=$(wc -l < "$file" 2>/dev/null || echo "0")
 
-        echo "::notice::Text format finding count not available (file has $line_count lines)"
+        # Write notice to stderr to avoid polluting GITHUB_OUTPUT
+        echo "::notice::Text format finding count not available (file has $line_count lines)" >&2
         echo "FINDINGS_COUNT=unknown"
         echo "CRITICAL_COUNT=unknown"
     else
