@@ -53,6 +53,7 @@ jobs:
           output-file: 'results-json.json'
           fail-on-findings: 'false'
           verify-signature: 'true'
+          upload-artifacts: 'false'
 
       - name: Verify JSON output exists
         run: |
@@ -80,6 +81,7 @@ jobs:
           output-file: 'results.sarif'
           fail-on-findings: 'false'
           verify-signature: 'false'  # Skip verification for speed
+          upload-artifacts: 'false'
 
       - name: Verify SARIF output
         run: |
@@ -98,6 +100,7 @@ jobs:
           output-file: 'results.txt'
           fail-on-findings: 'false'
           verify-signature: 'false'
+          upload-artifacts: 'false'
 
       - name: Check outputs are set
         run: |
@@ -132,6 +135,7 @@ jobs:
           output-format: 'json'
           fail-on-findings: 'false'
           verify-signature: 'false'
+          upload-artifacts: 'false'
 
       - name: Test severity filtering - ERROR only
         uses: ./
@@ -141,6 +145,7 @@ jobs:
           output-format: 'json'
           fail-on-findings: 'false'
           verify-signature: 'false'
+          upload-artifacts: 'false'
 
       - name: Test severity filtering - WARNING
         uses: ./
@@ -150,6 +155,7 @@ jobs:
           output-format: 'json'
           fail-on-findings: 'false'
           verify-signature: 'false'
+          upload-artifacts: 'false'
 
       - name: Test with custom timeout
         uses: ./
@@ -159,6 +165,7 @@ jobs:
           output-format: 'json'
           fail-on-findings: 'false'
           verify-signature: 'false'
+          upload-artifacts: 'false'
 
   # Test security features
   test-security:
@@ -175,6 +182,7 @@ jobs:
           output-format: 'json'
           verify-signature: 'true'
           fail-on-findings: 'false'
+          upload-artifacts: 'false'
 
       - name: Test signature verification disabled
         uses: ./
@@ -183,6 +191,7 @@ jobs:
           output-format: 'json'
           verify-signature: 'false'
           fail-on-findings: 'false'
+          upload-artifacts: 'false'
 
       - name: Test with different OpenGrep version
         uses: ./
@@ -192,6 +201,7 @@ jobs:
           output-format: 'json'
           verify-signature: 'true'
           fail-on-findings: 'false'
+          upload-artifacts: 'false'
 
   # Test caching behavior
   test-caching:
@@ -208,6 +218,7 @@ jobs:
           output-format: 'json'
           verify-signature: 'false'
           fail-on-findings: 'false'
+          upload-artifacts: 'false'
 
       - name: Second run (cache hit)
         uses: ./
@@ -216,6 +227,7 @@ jobs:
           output-format: 'json'
           verify-signature: 'false'
           fail-on-findings: 'false'
+          upload-artifacts: 'false'
 
   # Test error handling
   test-errors:
@@ -235,6 +247,7 @@ jobs:
           output-format: 'json'
           verify-signature: 'false'
           fail-on-findings: 'false'
+          upload-artifacts: 'false'
 
       - name: Verify error was handled
         run: |
@@ -253,6 +266,7 @@ jobs:
           output-format: 'json'
           verify-signature: 'false'
           fail-on-findings: 'false'
+          upload-artifacts: 'false'
 
   # Test fail-on-findings behavior
   test-fail-on-findings:
@@ -275,6 +289,7 @@ jobs:
           output-format: 'json'
           fail-on-findings: 'false'
           verify-signature: 'false'
+          upload-artifacts: 'false'
 
       - name: Test fail-on-findings enabled (should fail)
         id: test-fail
@@ -285,6 +300,7 @@ jobs:
           output-format: 'json'
           fail-on-findings: 'true'
           verify-signature: 'false'
+          upload-artifacts: 'false'
 
       - name: Verify workflow failed when findings detected
         run: |
@@ -307,7 +323,7 @@ jobs:
           paths: '.'
           output-format: 'json'
           upload-artifacts: 'true'
-          artifact-name: 'test-results'
+          artifact-name: 'test-results-artifact-upload-enabled'
           verify-signature: 'false'
           fail-on-findings: 'false'
 

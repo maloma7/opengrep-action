@@ -143,6 +143,9 @@ set -e
 echo "::endgroup::"
 
 # Enhanced error handling based on exit codes
+# Exit code 0 = no findings (success)
+# Exit code 1 = findings detected (still a successful scan)
+# Exit code 2+ = actual errors
 case $scan_exit_code in
     0)
         echo "::notice::Scan completed successfully with no findings"
@@ -196,7 +199,14 @@ if [ ! -f "${INPUT_OUTPUT_FILE}" ]; then
     esac
 fi
 
-# Export exit code for caller
+# Export exit code for caller (for debugging and workflow logic)
 echo "SCAN_EXIT_CODE=$scan_exit_code" >> "$GITHUB_OUTPUT"
 
-exit $scan_exit_code
+# Exit with 0 for successful scans (with or without findings)
+# Only exit non-zero for actual errors (exit codes 2+)
+# The fail-on-findings logic in action.yml will handle whether findings should fail the workflow
+if [ $scan_exit_code -le 1 ]; then
+    exit 0
+else
+    exit $scan_exit_code
+fi

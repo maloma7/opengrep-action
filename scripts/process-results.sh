@@ -158,12 +158,9 @@ main() {
 
     echo "::endgroup::"
 
-    # Return finding counts for fail-on-findings logic
-    if [ "$findings_count" != "unknown" ] && [ "$findings_count" -gt 0 ]; then
-        return 1  # Has findings
-    else
-        return 0  # No findings
-    fi
+    # Always return success - let the fail-on-findings step in action.yml handle workflow failure
+    # This ensures the process-results step doesn't prematurely fail the action
+    return 0
 }
 
 # Run if executed directly
